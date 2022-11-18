@@ -1,0 +1,1 @@
+This is a sample project using Azure EventGrid/Opentelemetry for distributed tracing
