@@ -1,4 +1,4 @@
-import { AzureFunction, Context } from "@azure/functions"
+import { AzureFunction, Context, TraceContext } from "@azure/functions"
 import * as opentelemetry from "@opentelemetry/api";
 import { NodeTracerProvider, BatchSpanProcessor } from "@opentelemetry/sdk-trace-node";
 import { AzureMonitorTraceExporter } from "@azure/monitor-opentelemetry-exporter";
@@ -37,33 +37,45 @@ const eventGridTrigger: AzureFunction = async function (context: Context, eventG
 
   const tracer = opentelemetry.trace.getTracer("EventGridConsumer");
 
-  const eventgridGetter: opentelemetry.TextMapGetter<EventGridData> = {
-    get(carrier: EventGridData, key: string) {
+  const eventgridGetter: opentelemetry.TextMapGetter<TraceContext> = {
+    get(carrier: TraceContext, key: string) {
       if (key === "traceparent") {
         return carrier.traceparent;
       } else if (key === "tracestate") {
         return carrier.tracestate;
       }
     },
-    keys(carrier: EventGridData) {
+    keys(carrier: TraceContext) {
       return [carrier.traceparent, carrier.tracestate]
     },
   };
 
-  const propagator = new W3CTraceContextPropagator();
-  const ctx = propagator.extract(opentelemetry.context.active(), eventGridEvent.data, eventgridGetter);
-  const ctxSpan = opentelemetry.trace.getSpan(ctx);
-
-  const options = {
-    links: [
-      {
-        context: ctxSpan.spanContext()
-      }
-    ]
+  const ctxProd: TraceContext = {
+    traceparent: eventGridEvent.data.traceparent,
+    tracestate: eventGridEvent.data.tracestate,
+    attributes: undefined
   };
+  const propagator = new W3CTraceContextPropagator();
+  const ctx = propagator.extract(
+    opentelemetry.ROOT_CONTEXT,
+    ctxProd,
+    eventgridGetter
+  );
 
-  tracer.startActiveSpan('Process EventGridEvents', options, async (span) => {
-    context.log(`ctx: ${JSON.stringify(ctx)}`);
+  // const ctxSpan = opentelemetry.trace.getSpan(ctx);
+
+  // const options = {
+  //   links: [
+  //     {
+  //       context: ctxSpan.spanContext()
+  //     }
+  //   ]
+  // };
+
+  // tracer.startActiveSpan('Process EventGridEvents', options, async (span) => {
+  tracer.startActiveSpan('Process EventGridEvents', {}, ctx, async (span) => {
+    span.addEvent("EventGrid function executed");
+    span.addEvent(`span.spanContext(): ${JSON.stringify(span.spanContext())}`);
     span.end();
   });
 };

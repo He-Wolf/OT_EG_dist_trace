@@ -1,5 +1,5 @@
 import { EventGridPublisherClient, AzureKeyCredential } from "@azure/eventgrid";
-import { AzureFunction, Context, HttpRequest } from "@azure/functions"
+import { AzureFunction, Context, HttpRequest, TraceContext } from "@azure/functions"
 import * as opentelemetry from "@opentelemetry/api";
 import { NodeTracerProvider, BatchSpanProcessor } from "@opentelemetry/sdk-trace-node";
 import { AzureMonitorTraceExporter } from "@azure/monitor-opentelemetry-exporter";
@@ -42,26 +42,52 @@ const httpTrigger: AzureFunction = async function (context: Context, req: HttpRe
 
   const tracer = opentelemetry.trace.getTracer("EventGridProducer");
 
-  const eventgridSetter: opentelemetry.TextMapSetter<EventGridData> = {
-    set(carrier: EventGridData, key: string, value: string) {
+  const eventgridGetter: opentelemetry.TextMapGetter<TraceContext> = {
+    get(carrier: TraceContext, key: string) {
+      if (key === "traceparent") {
+        return carrier.traceparent;
+      } else if (key === "tracestate") {
+        return carrier.tracestate;
+      }
+    },
+    keys(carrier: TraceContext) {
+      return [carrier.traceparent, carrier.tracestate]
+    },
+  };
+
+  const eventgridSetter: opentelemetry.TextMapSetter<TraceContext> = {
+    set(carrier: TraceContext, key: string, value: string) {
       if (key === "traceparent") {
         carrier.traceparent = value;
       } else if (key === "tracestate") {
         carrier.tracestate = value;
       }
-    }
+    },
   };
+
+  const propagator = new W3CTraceContextPropagator();
+  const ctx = propagator.extract(
+    opentelemetry.ROOT_CONTEXT,
+    context.traceContext,
+    eventgridGetter
+  );
+
+  const traceContext: TraceContext = {
+    traceparent: undefined,
+    tracestate: undefined,
+    attributes: undefined
+  };
+
+  propagator.inject(ctx, traceContext, eventgridSetter);
+  context.log(`traceContext: ${traceContext}`);
 
   const data: EventGridData = {
     message: responseMessage,
-    traceparent: "",
-    tracestate: ""
+    traceparent: traceContext.traceparent,
+    tracestate: traceContext.tracestate
   };
 
-  tracer.startActiveSpan('Send Event Grid event', async (span) => {
-    const propagator = new W3CTraceContextPropagator();
-    propagator.inject(opentelemetry.context.active(), data, eventgridSetter);
-
+  tracer.startActiveSpan('Send Event Grid event', {}, ctx, async (span) => {
     const client = new EventGridPublisherClient(
       process.env["EVENTGRID_ENDPOINT"],
       "EventGrid",
