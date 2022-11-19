@@ -35,7 +35,7 @@ const eventGridTrigger: AzureFunction = async function (context: Context, eventG
   provider.addSpanProcessor(processor);
   provider.register();
 
-  const tracer = opentelemetry.trace.getTracer("example-basic-tracer-node");
+  const tracer = opentelemetry.trace.getTracer("EventGridConsumer");
 
   const eventgridGetter: opentelemetry.TextMapGetter<EventGridData> = {
     get(carrier: EventGridData, key: string) {
@@ -61,7 +61,6 @@ const eventGridTrigger: AzureFunction = async function (context: Context, eventG
       }
     ]
   };
-  // opentelemetry.propagation.setGlobalPropagator(propagator);
 
   tracer.startActiveSpan('Process EventGridEvents', options, async (span) => {
     context.log(`ctx: ${JSON.stringify(ctx)}`);
@@ -70,7 +69,4 @@ const eventGridTrigger: AzureFunction = async function (context: Context, eventG
 };
 
 export default eventGridTrigger;
-function registerInstrumentations(arg0: { instrumentations: any[]; }) {
-  throw new Error("Function not implemented.");
-}
 
