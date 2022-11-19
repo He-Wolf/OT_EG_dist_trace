@@ -1,9 +1,11 @@
 import { AzureFunction, Context } from "@azure/functions"
 import * as opentelemetry from "@opentelemetry/api";
+import { NodeTracerProvider, BatchSpanProcessor } from "@opentelemetry/sdk-trace-node";
 import { AzureMonitorTraceExporter } from "@azure/monitor-opentelemetry-exporter";
-import { BasicTracerProvider, SimpleSpanProcessor } from "@opentelemetry/sdk-trace-base";
 import { W3CTraceContextPropagator } from "@opentelemetry/core";
 import { EventGridEvent } from "@azure/eventgrid";
+import { Resource } from "@opentelemetry/resources";
+import { SemanticResourceAttributes } from "@opentelemetry/semantic-conventions";
 
 interface EventGridData {
   message: string;
@@ -15,13 +17,24 @@ const eventGridTrigger: AzureFunction = async function (context: Context, eventG
   context.log(`typeof eventGridEvent: ${JSON.stringify(typeof eventGridEvent)}`);
   context.log(`eventGridEvent: ${JSON.stringify(eventGridEvent)}`);
 
-  const provider = new BasicTracerProvider();
+  const resource =
+    Resource.default().merge(
+      new Resource({
+        [SemanticResourceAttributes.SERVICE_NAME]: "service-name-here",
+        [SemanticResourceAttributes.SERVICE_VERSION]: "0.1.0",
+      })
+    );
+  const provider = new NodeTracerProvider({
+    resource: resource,
+  });
   const exporter = new AzureMonitorTraceExporter({
     connectionString:
       process.env["APPLICATIONINSIGHTS_CONNECTION_STRING"],
   });
-  provider.addSpanProcessor(new SimpleSpanProcessor(exporter));
+  const processor = new BatchSpanProcessor(exporter);
+  provider.addSpanProcessor(processor);
   provider.register();
+
   const tracer = opentelemetry.trace.getTracer("example-basic-tracer-node");
 
   const eventgridGetter: opentelemetry.TextMapGetter<EventGridData> = {
@@ -57,3 +70,7 @@ const eventGridTrigger: AzureFunction = async function (context: Context, eventG
 };
 
 export default eventGridTrigger;
+function registerInstrumentations(arg0: { instrumentations: any[]; }) {
+  throw new Error("Function not implemented.");
+}
+
