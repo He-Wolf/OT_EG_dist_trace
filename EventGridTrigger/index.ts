@@ -20,8 +20,8 @@ const eventGridTrigger: AzureFunction = async function (context: Context, eventG
   const resource =
     Resource.default().merge(
       new Resource({
-        [SemanticResourceAttributes.SERVICE_NAME]: "service-name-here",
-        [SemanticResourceAttributes.SERVICE_VERSION]: "0.1.0",
+        [SemanticResourceAttributes.FAAS_NAME]: "EventGrid Function",
+        [SemanticResourceAttributes.FAAS_VERSION]: "0.1.0",
       })
     );
   const provider = new NodeTracerProvider({
@@ -46,36 +46,34 @@ const eventGridTrigger: AzureFunction = async function (context: Context, eventG
       }
     },
     keys(carrier: TraceContext) {
-      return [carrier.traceparent, carrier.tracestate]
+      return ["traceparent", "tracestate"];
     },
   };
 
-  const ctxProd: TraceContext = {
-    traceparent: eventGridEvent.data.traceparent,
-    tracestate: eventGridEvent.data.tracestate,
-    attributes: undefined
-  };
   const propagator = new W3CTraceContextPropagator();
-  const ctx = propagator.extract(
+  const ctxProd = propagator.extract(
     opentelemetry.ROOT_CONTEXT,
-    ctxProd,
+    {
+      traceparent: eventGridEvent.data.traceparent,
+      tracestate: eventGridEvent.data.tracestate,
+      attributes: undefined
+    },
     eventgridGetter
   );
 
-  // const ctxSpan = opentelemetry.trace.getSpan(ctx);
+  const ctxProdSpan = opentelemetry.trace.getSpan(ctxProd);
 
-  // const options = {
-  //   links: [
-  //     {
-  //       context: ctxSpan.spanContext()
-  //     }
-  //   ]
-  // };
+  const options: opentelemetry.SpanOptions = {
+    links: [
+      {
+        context: ctxProdSpan.spanContext()
+      }
+    ]
+  };
 
-  // tracer.startActiveSpan('Process EventGridEvents', options, async (span) => {
-  tracer.startActiveSpan('Process EventGridEvents', {}, ctx, async (span) => {
+  tracer.startActiveSpan('Process EventGrid event', options, async (span) => {
     span.addEvent("EventGrid function executed");
-    span.addEvent(`span.spanContext(): ${JSON.stringify(span.spanContext())}`);
+    span.addEvent(`span.spanContext() in span: ${JSON.stringify(span.spanContext())}`);
     span.end();
   });
 };

@@ -25,8 +25,8 @@ const httpTrigger: AzureFunction = async function (context: Context, req: HttpRe
   const resource =
     Resource.default().merge(
       new Resource({
-        [SemanticResourceAttributes.SERVICE_NAME]: "service-name-here",
-        [SemanticResourceAttributes.SERVICE_VERSION]: "0.1.0",
+        [SemanticResourceAttributes.FAAS_NAME]: "Http Function",
+        [SemanticResourceAttributes.FAAS_VERSION]: "0.1.0",
       })
     );
   const provider = new NodeTracerProvider({
@@ -51,7 +51,7 @@ const httpTrigger: AzureFunction = async function (context: Context, req: HttpRe
       }
     },
     keys(carrier: TraceContext) {
-      return [carrier.traceparent, carrier.tracestate]
+      return ["traceparent", "tracestate"];
     },
   };
 
@@ -72,27 +72,28 @@ const httpTrigger: AzureFunction = async function (context: Context, req: HttpRe
     eventgridGetter
   );
 
-  const traceContext: TraceContext = {
-    traceparent: undefined,
-    tracestate: undefined,
-    attributes: undefined
-  };
+  let data: EventGridData;
 
-  propagator.inject(ctx, traceContext, eventgridSetter);
-  context.log(`traceContext: ${traceContext}`);
-
-  const data: EventGridData = {
-    message: responseMessage,
-    traceparent: traceContext.traceparent,
-    tracestate: traceContext.tracestate
-  };
-
-  tracer.startActiveSpan('Send Event Grid event', {}, ctx, async (span) => {
+  tracer.startActiveSpan('Send EventGrid event', {}, ctx, async (span) => {
     const client = new EventGridPublisherClient(
       process.env["EVENTGRID_ENDPOINT"],
       "EventGrid",
       new AzureKeyCredential(process.env["EVENTGRID_ACCESS_KEY"])
     );
+
+    const traceContext: TraceContext = {
+      traceparent: undefined,
+      tracestate: undefined,
+      attributes: undefined
+    };
+
+    propagator.inject(opentelemetry.context.active(), traceContext, eventgridSetter);
+
+    data = {
+      message: responseMessage,
+      traceparent: traceContext.traceparent,
+      tracestate: traceContext.tracestate
+    };
 
     await client.send([
       {
