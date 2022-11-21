@@ -7,11 +7,6 @@ import { W3CTraceContextPropagator } from "@opentelemetry/core";
 import { Resource } from "@opentelemetry/resources";
 import { SemanticResourceAttributes } from "@opentelemetry/semantic-conventions";
 
-interface EventGridData {
-  message: string;
-  traceparent: string;
-  tracestate: string;
-}
 
 const httpTrigger: AzureFunction = async function (context: Context, req: HttpRequest): Promise<void> {
   context.log('HTTP trigger function processed a request.');
@@ -72,7 +67,11 @@ const httpTrigger: AzureFunction = async function (context: Context, req: HttpRe
     eventgridGetter
   );
 
-  let data: EventGridData;
+  const traceContext: TraceContext = {
+    traceparent: undefined,
+    tracestate: undefined,
+    attributes: undefined
+  };
 
   tracer.startActiveSpan('Send EventGrid event', {}, ctx, async (span) => {
     const client = new EventGridPublisherClient(
@@ -81,26 +80,18 @@ const httpTrigger: AzureFunction = async function (context: Context, req: HttpRe
       new AzureKeyCredential(process.env["EVENTGRID_ACCESS_KEY"])
     );
 
-    const traceContext: TraceContext = {
-      traceparent: undefined,
-      tracestate: undefined,
-      attributes: undefined
-    };
-
     propagator.inject(opentelemetry.context.active(), traceContext, eventgridSetter);
-
-    data = {
-      message: responseMessage,
-      traceparent: traceContext.traceparent,
-      tracestate: traceContext.tracestate
-    };
 
     await client.send([
       {
         eventType: "Azure.Sdk.SampleEvent",
         subject: "Event Subject",
         dataVersion: "1.0",
-        data: data
+        data: {
+          message: responseMessage,
+          traceparent: traceContext.traceparent,
+          tracestate: traceContext.tracestate
+        }
       }
     ]);
     span.end();
@@ -108,7 +99,7 @@ const httpTrigger: AzureFunction = async function (context: Context, req: HttpRe
 
   context.res = {
     // status: 200, /* Defaults to 200 */
-    body: data
+    body: { responseMessage, traceContext }
   };
 
 };
