@@ -1,11 +1,11 @@
-import { AzureFunction, Context, TraceContext } from "@azure/functions"
 import * as opentelemetry from "@opentelemetry/api";
-import { NodeTracerProvider, BatchSpanProcessor } from "@opentelemetry/sdk-trace-node";
+import { NodeTracerProvider, SimpleSpanProcessor } from "@opentelemetry/sdk-trace-node";
 import { AzureMonitorTraceExporter } from "@azure/monitor-opentelemetry-exporter";
 import { W3CTraceContextPropagator } from "@opentelemetry/core";
-import { EventGridEvent } from "@azure/eventgrid";
 import { Resource } from "@opentelemetry/resources";
 import { SemanticResourceAttributes } from "@opentelemetry/semantic-conventions";
+import { createAzureSdkInstrumentation } from "@azure/opentelemetry-instrumentation-azure-sdk";
+import { registerInstrumentations } from "@opentelemetry/instrumentation";
 
 interface EventGridData {
   message: string;
@@ -13,28 +13,34 @@ interface EventGridData {
   tracestate: string;
 }
 
+const resource =
+Resource.default().merge(
+  new Resource({
+    [SemanticResourceAttributes.FAAS_NAME]: "EventGrid Function",
+    [SemanticResourceAttributes.FAAS_VERSION]: "0.1.0",
+  })
+);
+const provider = new NodeTracerProvider({
+resource: resource,
+});
+const exporter = new AzureMonitorTraceExporter({
+connectionString:
+  process.env["APPLICATIONINSIGHTS_CONNECTION_STRING"],
+});
+const processor = new SimpleSpanProcessor(exporter);
+provider.addSpanProcessor(processor);
+provider.register();
+
+registerInstrumentations({
+instrumentations: [createAzureSdkInstrumentation()],
+});
+
+import { AzureFunction, Context, TraceContext } from "@azure/functions"
+import { EventGridEvent } from "@azure/eventgrid";
+
 const eventGridTrigger: AzureFunction = async function (context: Context, eventGridEvent: EventGridEvent<EventGridData>): Promise<void> {
   context.log(`typeof eventGridEvent: ${JSON.stringify(typeof eventGridEvent)}`);
   context.log(`eventGridEvent: ${JSON.stringify(eventGridEvent)}`);
-
-  const resource =
-    Resource.default().merge(
-      new Resource({
-        [SemanticResourceAttributes.FAAS_NAME]: "EventGrid Function",
-        [SemanticResourceAttributes.FAAS_VERSION]: "0.1.0",
-      })
-    );
-  const provider = new NodeTracerProvider({
-    resource: resource,
-  });
-  const exporter = new AzureMonitorTraceExporter({
-    connectionString:
-      process.env["APPLICATIONINSIGHTS_CONNECTION_STRING"],
-  });
-  const processor = new BatchSpanProcessor(exporter);
-  provider.addSpanProcessor(processor);
-  provider.register();
-
   const tracer = opentelemetry.trace.getTracer("EventGridConsumer");
 
   const eventgridGetter: opentelemetry.TextMapGetter<TraceContext> = {
@@ -73,6 +79,7 @@ const eventGridTrigger: AzureFunction = async function (context: Context, eventG
 
   tracer.startActiveSpan('Process EventGrid event', options, async (span) => {
     span.addEvent("EventGrid function executed");
+    context.log("Hello")
     span.addEvent(`span.spanContext() in span: ${JSON.stringify(span.spanContext())}`);
     span.end();
   });
